@@ -27,6 +27,7 @@ import struct
 # So all the client is doing is obscuring the destination and already encrypted data of the request
 # then the server sends that forwarded request to the actual website it wants to go to.
 # then the server gets the data back and sends it ecrypted back to the client who then returns that data back to the browser
+#
 
 #We use 3 socket connections
     #1) browser (or curl) to local proxy
