@@ -2,14 +2,16 @@ import socket
 import threading
 import sys
 
-#key derivation libraries from pycryptodome
+#encryption libraries from pycryptodome
 from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
+from Crypto.PublicKey import ECC
+
 import struct
 
-
+#MOST IMPORTANT THINGS TO DO
 #TODO: 
     # - need to ecrypt the CONNECT request that is initially sent so that no one 
     #   can see where you are going
@@ -17,7 +19,7 @@ import struct
     # - should also implement diffie-hellman (Should be able to do this with ECC)
     #   Can use the client as a CA to validate of anyone is trying to Man in the Middle us
 
-    # - should also use some kind of morphing/randomization to obfuscate packet structure
+    # -  (PROB WON'T HAPPEN) should also use some kind of morphing/randomization to obfuscate packet structure
 
 #curl command for testing: curl -v -x http://127.0.0.1:8888 https://www.weatherbuddy.org:443
 
@@ -103,6 +105,7 @@ def forward_traffic(source, dest, mode,key):
     except Exception as e:
         print(f"Remote setup error: {e}")
         source.close()
+
     finally:
         #try to close socket if it's not already closed
         try:
@@ -117,7 +120,7 @@ def forward_traffic(source, dest, mode,key):
             pass
 
 
-def start_remote_proxy(passKey):
+def start_remote_proxy(passKey, remote_host_broadcast_addr='127.0.0.1:9999'):
 
 
     #generate a salted key from our password
@@ -165,7 +168,7 @@ def start_remote_proxy(passKey):
             # start data transfer between client and server
 
 
-def start_client_proxy(passKey):
+def start_client_proxy(passKey,local_host_addr='127.0.0.1:8888',remote_host_connection="127.0.0.1:9999"):
 
     #generate a salted key from our password
     #salt = get_random_bytes(16)
@@ -182,9 +185,7 @@ def start_client_proxy(passKey):
 
     while True:
         client_sock, addr = local_server.accept()
-        #this could cause a crash down the line if we
-        # don't read just the raw bytes before the
-        # decode
+
         request = client_sock.recv(4096).decode('utf-8')
         request_first_line = request.split('\n')[0]
         if "CONNECT" not in request_first_line:
@@ -200,35 +201,14 @@ def start_client_proxy(passKey):
             #connecting to other laptop for now
             remote_connection.connect(('192.168.137.25',9999)) #set this back to 127.0.0.1 for local testing
 
+            #TODO: this is the connect request that we want to encrypt initially
             #send the initial request from the browser to the remote server
             remote_connection.sendall(request.encode('utf-8'))
-
-            
-            #Wait for the remote server to send this instead
-            #client_sock.send(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-
-            #accounts for partial data received
             
 
-            #start the data transfer between browser and local proxy
-                #encrypt local traffic here before sending
+            #TODO: This should be receiving and decoding an encrypted OK response instead of getting it as
+            #plaintext
             
-
-            #this actually forwards traffic between client
-            # and the website we want
-            #need to do this on threads so the data transfer actual
-            # completes
-
-
-            #read the OK response before starting the threads
-            #response = remote_connection.recv(4096)
-            #if b"200 Connection Established" in response:
-                # Pass the 200 OK back to the browser so IT knows we are ready
-             #   client_sock.sendall(response)
-            #else:
-             #   print("Remote server failed to establish connection")
-              #  return
-
             #getting OK message back before anything else
             response = b""
             while b"\r\n\r\n" not in response:
@@ -268,6 +248,6 @@ if sys.argv[2] == '-p':
 else:
     print("-p password required")
     
+#TODO: add arguments for specifying addresses used in connections
 
-#TODO: should implement a helper function for reading and writing encrypted traffic
-# so we don't crash or get out of sync if we read a wrong amount of data somehow
+#TODO: also allow users to specify encryption mode between PBKD and ECC
