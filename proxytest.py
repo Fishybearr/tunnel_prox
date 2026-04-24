@@ -11,35 +11,7 @@ from Crypto.PublicKey import ECC
 
 import struct
 
-#MOST IMPORTANT THINGS TO DO
-#TODO: 
-    # - need to ecrypt the CONNECT request that is initially sent so that no one 
-    #   can see where you are going
-    
-    # - should also implement diffie-hellman (Should be able to do this with ECC)
-    #   Can use the client as a CA to validate of anyone is trying to Man in the Middle us
-
-    # -  (PROB WON'T HAPPEN) should also use some kind of morphing/randomization to obfuscate packet structure
-
 #curl command for testing: curl -v -x http://127.0.0.1:8888 https://www.weatherbuddy.org:443
-
-#So the idea is that this is a local proxy that intercepts data from my machine, and then sends data to the remote server proxy
-
-#the client proxy is considered trusted because the HTTPS data is never decrypted.
-# So all the client is doing is obscuring the destination and already encrypted data of the request
-# then the server sends that forwarded request to the actual website it wants to go to.
-# then the server gets the data back and sends it ecrypted back to the client who then returns that data back to the browser
-#
-
-#We use 3 socket connections
-    #1) browser (or curl) to local proxy
-    #2) local proxy to remote 'proxy' server
-    #3) remote 'proxy' server to website
-
-#TODO: Test this between both linux laptops
-#      with the Windows laptop as a router
-# Also may need to deal with firewall rules on both
-# systems so don't forget that
 
 
 def recv_all(sock, n):
@@ -120,19 +92,138 @@ def forward_traffic(source, dest, mode,key):
             pass
 
 
+#transmits the original CONNECT request between client and remote proxy server
+def transmit_handshake_client(client_server, remote_server, key):
+
+    try:
+        
+
+  
+        #encrypt our initial packet
+        #then transmit it
+
+        request = client_server.recv(4096).decode('utf-8')
+        if "CONNECT" not in request:
+            return False
+
+        else:
+            #encode our request into utf-8
+            request = request.encode('utf-8')
+
+            #encrypt request
+            iv = get_random_bytes(16) #this works with AES128
+            ctr = Counter.new(128,initial_value=int.from_bytes(iv,byteorder='big'))
+            cipher = AES.new(key,AES.MODE_CTR,counter=ctr)
+            ciphertext = cipher.encrypt(request)
+
+            #now pack data into serialized form [data size (int 4 bytes) | iv (byte array 16 bytes) | data (byte array data size)]
+            data_size = len(ciphertext)
+            packet_header = struct.pack('!I',data_size)
+        
+            #send this request to the server
+            remote_server.sendall(packet_header + iv + ciphertext)
+
+           
+        #decrypt packet and assert that the response is a Connection OK message
+
+        #read header from server
+        resp_header = recv_all(remote_server, 4)
+        if len(resp_header) < 4: return False
+
+        #unpack header
+        resp_data_len = struct.unpack('!I',resp_header)[0]
+
+        # try to get 16 bytes for our iv
+        resp_iv = recv_all(remote_server, 16)
+
+        #try to read our data
+        resp_data = recv_all(remote_server, resp_data_len)
+
+        #create ctr object
+        resp_ctr = Counter.new(128,initial_value=int.from_bytes(resp_iv,byteorder='big'))
+        resp_cipher = AES.new(key,AES.MODE_CTR, counter=resp_ctr)
+        resp_plaintext = resp_cipher.decrypt(resp_data)
+
+        if b"200" in resp_plaintext:
+            client_server.sendall(resp_plaintext)
+            return True
+        
+        print("Handshake failed")
+        return False
+
+
+    except Exception as e:
+        print(f"Remote setup error: {e}")
+        return False
+
+
+
+#transmits the initial connect request response back to the client
+def transmit_handshake_server(remote_server, client_sock, key):
+    try:
+
+
+        header = recv_all(client_sock,4)
+        if len(header) < 4: return None
+
+        data_len = struct.unpack('!I',header)[0]
+
+        iv = recv_all(client_sock, 16)
+
+        data = recv_all(client_sock, data_len)
+
+        resp_ctr = Counter.new(128,initial_value=int.from_bytes(iv,byteorder='big'))
+        resp_cipher = AES.new(key,AES.MODE_CTR, counter=resp_ctr)
+        plaintext = resp_cipher.decrypt(data)
+
+        #now get the addr and port from this plaintext
+        request = plaintext.decode('utf-8')
+        request_first_line = request.split('\n')[0].strip()
+        if "CONNECT" not in request_first_line:
+            print("Not a connect request! REJECT")
+            return None
+        else:
+            site_addr,site_port = (request_first_line.split(' ')[1]).split(':')
+            print(site_addr,site_port)
+            
+            # would add the request info to the return here
+            # if it's valid
+
+        
+        #now encrypt message and send it back to the client server
+        raw_message = b"HTTP/1.1 200 Connection Established\r\n\r\n"
+        
+        iv = get_random_bytes(16) #this works with AES128
+        ctr = Counter.new(128,initial_value=int.from_bytes(iv,byteorder='big'))
+        cipher = AES.new(key,AES.MODE_CTR,counter=ctr)
+        ciphertext = cipher.encrypt(raw_message)
+
+        #now pack data into serialized form [data size (int 4 bytes) | iv (byte array 16 bytes) | data (byte array data size)]
+        data_size = len(ciphertext)
+        packet_header = struct.pack('!I',data_size)
+
+        client_sock.sendall(packet_header + iv + ciphertext)
+        return (site_addr,site_port) #would also return addr and port here
+
+
+    
+
+    except Exception as e:
+        print(f"Remote setup error: {e}")
+        return None
+
+
+
+
 def start_remote_proxy(passKey, remote_host_broadcast_addr='127.0.0.1:9999'):
 
 
     #generate a salted key from our password
-    #salt = get_random_bytes(16)
     shared_salt = b'\x12\x34\x56\x78\x90\xab\xcd\xef\x11\x22\x33\x44\x55\x66\x77\x88'
     key = PBKDF2(passKey,shared_salt,dkLen=32,count=1000000)
     
 
     remote_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #FIXME TEMPORARILY BINDING TO LOCALHOST ON ANOTHER PORT FOR TESTING 
-    # SHOULD BE ABLE TO USE 0.0.0.0:9999 for local testing as it'll accept
-    # any incoming traffic as long as port is correct
     remote_server.bind(('127.0.0.1',9999)) #on the remote server this is set to 0.0.0.0:9999
     remote_server.listen(5)
     print("listening on remote server")
@@ -140,32 +231,27 @@ def start_remote_proxy(passKey, remote_host_broadcast_addr='127.0.0.1:9999'):
     while True:
         client_sock, addr = remote_server.accept()
 
-        request = client_sock.recv(4096).decode('utf-8')
-        request_first_line = request.split('\n')[0]
-        if "CONNECT" not in request_first_line:
-            print("Not a connect request! REJECT")
-        else:
-            site_addr,site_port = (request_first_line.split(' ')[1]).split(':')
-            print(site_addr,site_port)
+        #Check if we got a a port and addr back from CONNECT request
+        request_reseult = transmit_handshake_server(remote_server, client_sock, key)
+        if request_reseult is None:
+            client_sock.close()
+            continue
 
-            #Connection to the website from our server
-            remote_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            remote_connection.connect((site_addr,int(site_port)))
-
-            
-            #This needs to be encrypted like a normal message before sending
-            # since the client expects the other form
-            #tell client, which tells the browser we're ready to stream data now
-            client_sock.send(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        #if we got an addr and port back we can read them here
+        site_addr,site_port = request_reseult
 
 
-            #We now send data between client and server
-            t1 = threading.Thread(target=forward_traffic, args=(client_sock,remote_connection,"dec",key))
-            t2 = threading.Thread(target=forward_traffic, args=(remote_connection,client_sock,"enc",key))
+        #Connection to the website from our server
+        remote_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        remote_connection.connect((site_addr,int(site_port)))
 
-            t1.start()
-            t2.start()
-            # start data transfer between client and server
+
+        #We now send data between client and server
+        t1 = threading.Thread(target=forward_traffic, args=(client_sock,remote_connection,"dec",key))
+        t2 = threading.Thread(target=forward_traffic, args=(remote_connection,client_sock,"enc",key))
+
+        t1.start()
+        t2.start()
 
 
 def start_client_proxy(passKey,local_host_addr='127.0.0.1:8888',remote_host_connection="127.0.0.1:9999"):
@@ -185,56 +271,30 @@ def start_client_proxy(passKey,local_host_addr='127.0.0.1:8888',remote_host_conn
 
     while True:
         client_sock, addr = local_server.accept()
+        remote_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        request = client_sock.recv(4096).decode('utf-8')
-        request_first_line = request.split('\n')[0]
-        if "CONNECT" not in request_first_line:
-            print("Not a connect request! REJECT")
-        else:
-            site_addr,site_port = (request_first_line.split(' ')[1]).split(':')
-            print(site_addr,site_port)
+        try:
+            remote_connection.connect(('127.0.0.1',9999))
 
-            #would connect to our server here with a socket
-            #FIXME TEMP CONNECT DIRECTLY TO REMOTE PROXY HARDCODED
-            remote_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            #remote_connection.connect(('127.0.0.1',9999))
-            #connecting to other laptop for now
-            remote_connection.connect(('192.168.137.25',9999)) #set this back to 127.0.0.1 for local testing
+            if transmit_handshake_client(client_sock, remote_connection, key):
+        
+        
+                t1 = threading.Thread(target=forward_traffic, args=(client_sock,remote_connection,"enc",key))
+                t2 = threading.Thread(target=forward_traffic, args=(remote_connection,client_sock,"dec",key))
 
-            #TODO: this is the connect request that we want to encrypt initially
-            #send the initial request from the browser to the remote server
-            remote_connection.sendall(request.encode('utf-8'))
-            
-
-            #TODO: This should be receiving and decoding an encrypted OK response instead of getting it as
-            #plaintext
-            
-            #getting OK message back before anything else
-            response = b""
-            while b"\r\n\r\n" not in response:
-                chunk = remote_connection.recv(1) # Read 1 byte at a time to be safe
-                if not chunk: break
-                response += chunk
-
-            if b"200" in response:
-                client_sock.sendall(response)
+                t1.start()
+                t2.start()
             else:
-                print("Handshake failed")
-                return
-            
-            #each of these threads would either have an encrypt or decrypt mode set in their args
-            # this would make sure traffic flowing is always in the right state for whoever gets it
-            # Also need to make sure to get encrypted traffic sizes working so we don't read the
-            # wrong amount of data
-            t1 = threading.Thread(target=forward_traffic, args=(client_sock,remote_connection,"enc",key))
-            t2 = threading.Thread(target=forward_traffic, args=(remote_connection,client_sock,"dec",key))
-
-            t1.start()
-            t2.start()
-            # start data transfer between client and server
+                print("Handshake failed, closing connection")
+                client_sock.close()
+                remote_connection.close()
+        except Exception as e:
+            print(f"Connection Error: {e}")
+            client_sock.close()
 
 
-#need some more logic to prevent incorrect usage
+
+#TODO: need some more logic to prevent incorrect usage
 if sys.argv[2] == '-p':
     passkey = sys.argv[3]
 
