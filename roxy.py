@@ -11,6 +11,10 @@ from Crypto.PublicKey import ECC
 
 import struct
 
+#TODO: import Diffie Hellman from Crypto
+from Crypto.Protocol.DH import key_agreement
+from Crypto.Hash import SHA256
+
 #curl command for testing: curl -v -x http://127.0.0.1:8888 https://www.weatherbuddy.org:443
 
 
@@ -161,8 +165,6 @@ def transmit_handshake_client(client_server, remote_server, key):
 #transmits the initial connect request response back to the client
 def transmit_handshake_server(remote_server, client_sock, key):
     try:
-
-
         header = recv_all(client_sock,4)
         if len(header) < 4: return None
 
@@ -212,24 +214,68 @@ def transmit_handshake_server(remote_server, client_sock, key):
         print(f"Remote setup error: {e}")
         return None
 
+def ECC_Handshake(dest_sock,source_pub_key, is_client=True):
+    try:
+      
+        #This ensures that both don't send their data
+        # at the exact same time
+        if is_client:
+            dest_sock.sendall(source_pub_key)
+            dest_pub_key = recv_all(dest_sock,len(source_pub_key))
+
+        else:
+            dest_pub_key = recv_all(dest_sock,len(source_pub_key))
+            dest_sock.sendall(source_pub_key)
+        
+
+        if not dest_pub_key:
+            return None
+
+        #return the actual rebuilt key
+        return ECC.import_key(dest_pub_key)
+
+
+    except Exception as e:
+        print(f"Remote setup error: {e}")
+        return None
 
 
 
-def start_remote_proxy(passKey, remote_host_broadcast_addr='127.0.0.1:9999'):
 
+def start_remote_proxy(passKey="testPass", remote_host_broadcast_addr='127.0.0.1',enc_mode="PBKD"):
 
+    #TODO: figure out if this needs to be modified at all
     #generate a salted key from our password
     shared_salt = b'\x12\x34\x56\x78\x90\xab\xcd\xef\x11\x22\x33\x44\x55\x66\x77\x88'
     key = PBKDF2(passKey,shared_salt,dkLen=32,count=1000000)
-    
+
+    #TODO: Check here what enc mode the user picked and decide if we use ECC or PBKD
 
     remote_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    remote_server.bind(('127.0.0.1',9999)) #on the remote server this is set to 0.0.0.0:9999
+    remote_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    remote_server.bind((remote_host_broadcast_addr,9999)) #on the remote server this is set to 0.0.0.0:9999
     remote_server.listen(5)
     print("listening on remote server")
 
     while True:
         client_sock, addr = remote_server.accept()
+
+        if enc_mode == "ECC":
+            #generate our new for the server
+            # then send the public to the client and read the clients public
+            server_key = ECC.generate(curve='p256')
+            server_pub_key_bytes = server_key.public_key().export_key(format='DER')
+
+            client_ECC = ECC_Handshake(client_sock,server_pub_key_bytes, is_client=False)
+
+            if client_ECC is None:
+                client_sock.close()
+                continue
+            
+            key = key_agreement(static_priv=server_key, static_pub=client_ECC,kdf=lambda x: SHA256.new(x).digest())
+            
+    
+        
 
         #Check if we got a a port and addr back from CONNECT request
         request_reseult = transmit_handshake_server(remote_server, client_sock, key)
@@ -254,17 +300,14 @@ def start_remote_proxy(passKey, remote_host_broadcast_addr='127.0.0.1:9999'):
         t2.start()
 
 
-def start_client_proxy(passKey,local_host_addr='127.0.0.1:8888',remote_host_connection="127.0.0.1:9999"):
+def start_client_proxy(passKey="testPass",local_host_addr='127.0.0.1:8888',remote_host_connection="127.0.0.1",enc_mode="PBKD"):
 
-    #generate a salted key from our password
-    #salt = get_random_bytes(16)
     shared_salt = b'\x12\x34\x56\x78\x90\xab\xcd\xef\x11\x22\x33\x44\x55\x66\x77\x88'
     key = PBKDF2(passKey,shared_salt,dkLen=32,count=1000000)
     
-
-
-
+    
     local_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    local_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     local_server.bind(('127.0.0.1',8888))
     local_server.listen(5)
     print("listening on localhost:8888")
@@ -273,8 +316,23 @@ def start_client_proxy(passKey,local_host_addr='127.0.0.1:8888',remote_host_conn
         client_sock, addr = local_server.accept()
         remote_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
+
         try:
-            remote_connection.connect(('127.0.0.1',9999))
+            remote_connection.connect((remote_host_connection,9999))
+
+            if enc_mode == "ECC":
+                client_key = ECC.generate(curve='p256')
+                client_pub_key_bytes = client_key.public_key().export_key(format='DER')
+
+                server_ECC = ECC_Handshake(remote_connection,client_pub_key_bytes, is_client=True)
+
+                if server_ECC is None:
+                    remote_connection.close()
+                    continue
+            
+                key = key_agreement(static_priv=client_key, static_pub=server_ECC,kdf=lambda x: SHA256.new(x).digest())
+
+
 
             if transmit_handshake_client(client_sock, remote_connection, key):
         
@@ -293,21 +351,42 @@ def start_client_proxy(passKey,local_host_addr='127.0.0.1:8888',remote_host_conn
             client_sock.close()
 
 
+def process_com_args():
+    try:
+        if sys.argv[1] == "client":
+            if sys.argv[2] == "ECC":
+                if sys.argv[3] == "local":
+                    start_client_proxy(enc_mode="ECC")
 
-#TODO: need some more logic to prevent incorrect usage
-if sys.argv[2] == '-p':
-    passkey = sys.argv[3]
+                elif sys.argv[3] == "remote":
+                     start_client_proxy(enc_mode="ECC",remote_host_broadcast_addr = "0.0.0.0")
 
-    if sys.argv[1] == 'client':
-        start_client_proxy(passkey)
+            elif sys.argv[2] == "PBKD":
+                if sys.argv[3] == "local":
+                    start_client_proxy(enc_mode="PBKD",passKey = sys.argv[4])
 
-    else:
-        start_remote_proxy(passkey)
+                elif sys.argv[3] == "remote":
+                     start_client_proxy(enc_mode="PBDK",passKey = sys.argv[4],remote_host_broadcast_addr = "0.0.0.0")
+        
+        elif sys.argv[1] == "server":
+            if sys.argv[2] == "ECC":
+                if sys.argv[3] == "local":
+                    start_remote_proxy(enc_mode="ECC")
+
+                elif sys.argv[3] == "remote":
+                     start_remote_proxy(enc_mode="ECC",remote_host_broadcast_addr = "0.0.0.0")
+
+            elif sys.argv[2] == "PBKD":
+                if sys.argv[3] == "local":
+                    start_remote_proxy(enc_mode="PBKD",passKey = sys.argv[4])
+
+                elif sys.argv[3] == "remote":
+                     start_remote_proxy(enc_mode="PBDK",passKey = sys.argv[4],remote_host_broadcast_addr = "0.0.0.0")
+
+                     
+    except Exception as e:
+        print(f"invalid arguments {e}")
 
 
-else:
-    print("-p password required")
-    
-#TODO: add arguments for specifying addresses used in connections
 
-#TODO: also allow users to specify encryption mode between PBKD and ECC
+process_com_args()
