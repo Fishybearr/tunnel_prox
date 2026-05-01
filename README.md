@@ -13,8 +13,8 @@ https://github.com/Fishybearr/tunnel_prox/tree/main
 ```
 2) install dependencies
 
-[!WARNING] 
-pycryptodome can conflict with the deprecated Crypto package
+> [!WARNING] 
+> pycryptodome can conflict with the deprecated Crypto package
 
 2) run this in a terminal
 ```bash
@@ -72,14 +72,14 @@ remote
 
 - Will automatically be hosted on port 9999
 
-[!WARNING] 
-The server ip needs to be a local ip on the same network as the client unless you want to deal with port forwarding the server, which is untested
+> [!WARNING] 
+> The server ip needs to be a local ip on the same network as the client unless you want to deal with port forwarding the server, which is untested
 
 ### password (string) (optional)
 - If PBDK is used for handshake_mode then a password string is required for generating a key used to encrypt/decrypt traffic.
      
-[!WARNING] 
-If no password is provided, the default password of "testPass" will be used, whicch is obviously not secure
+> [!WARNING] 
+> If no password is provided, the default password of "testPass" will be > used, which is obviously not secure
 
 ## Testing
 These are the 2 best methods I've found for testing roxy
@@ -106,5 +106,5 @@ python roxy.py server ECC local
 
 4) Now visit a website and observe the address of the website being printed in the second terminal
 
-[!NOTE] 
-The load times in firefox with the proxy tend to be quite slow
+> [!NOTE] 
+> The load times in firefox with the proxy tend to be quite slow
