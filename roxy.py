@@ -100,12 +100,6 @@ def forward_traffic(source, dest, mode,key):
 def transmit_handshake_client(client_server, remote_server, key):
 
     try:
-        
-
-  
-        #encrypt our initial packet
-        #then transmit it
-
         request = client_server.recv(4096).decode('utf-8')
         if "CONNECT" not in request:
             return False
@@ -152,7 +146,6 @@ def transmit_handshake_client(client_server, remote_server, key):
             client_server.sendall(resp_plaintext)
             return True
         
-        print("Handshake failed")
         return False
 
 
@@ -182,7 +175,6 @@ def transmit_handshake_server(remote_server, client_sock, key):
         request = plaintext.decode('utf-8')
         request_first_line = request.split('\n')[0].strip()
         if "CONNECT" not in request_first_line:
-            print("Not a connect request! REJECT")
             return None
         else:
             site_addr,site_port = (request_first_line.split(' ')[1]).split(':')
