@@ -27,7 +27,8 @@ def recv_all(sock, n):
         data += packet
     return data
 
-
+#Transmits traffic between client and server
+# All traffic is encrypted and decrypted in this function
 def forward_traffic(source, dest, mode,key):
     iv = None
     data = None
@@ -156,7 +157,7 @@ def transmit_handshake_client(client_server, remote_server, key):
 
 
 
-#transmits the initial connect request response back to the client
+#transmits the initial CONNECT request response back to the client
 def transmit_handshake_server(remote_server, client_sock, key):
     try:
         header = recv_all(client_sock,4)
@@ -206,6 +207,7 @@ def transmit_handshake_server(remote_server, client_sock, key):
         print(f"Remote setup error: {e}")
         return None
 
+#handles transmitting public keys between client and server
 def ECC_Handshake(dest_sock,source_pub_key, is_client=True):
     try:
         #This ensures that both client and server don't send their data
@@ -374,7 +376,7 @@ def process_com_args():
                     start_remote_proxy(enc_mode="PBKD",passKey = sys.argv[4])
 
                 elif sys.argv[3] == "remote":
-                     start_remote_proxy(enc_mode="PBDK",passKey = sys.argv[4],remote_host_broadcast_addr = "0.0.0.0")
+                     start_remote_proxy(enc_mode="PBKD",passKey = sys.argv[4],remote_host_broadcast_addr = "0.0.0.0")
 
                      
     except Exception as e:

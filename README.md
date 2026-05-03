@@ -35,9 +35,23 @@ curl -x http://127.0.0.1:8888 https://www.weatherbuddy.org:443/roxy.html
 
 
 ## Usage
+- ECC local
 ```bash
-python roxy.py <host> <handshake_mode> <execution_mode> <optional remote_host_address> <optional password>
+python roxy.py <host> ECC local
 ```
+- ECC remote
+```bash
+python roxy.py <host> ECC remote <remote_host_address>
+```
+- PBKD local
+```bash
+python roxy.py <host> PBKD local <password>
+```
+- PBKD remote
+```bash
+python roxy.py <host> PBKD remote <remote_host_address> <password>
+```
+
 ## Arguments
 ### host (string)
 client
