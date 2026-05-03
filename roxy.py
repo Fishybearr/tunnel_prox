@@ -11,11 +11,12 @@ from Crypto.PublicKey import ECC
 
 import struct
 
-#TODO: import Diffie Hellman from Crypto
+#import Diffie Hellman from pycryptodome
 from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHA256
 
-#curl command for testing: curl -v -x http://127.0.0.1:8888 https://www.weatherbuddy.org:443
+#used for testing connections times
+import time
 
 
 def recv_all(sock, n):
@@ -179,9 +180,6 @@ def transmit_handshake_server(remote_server, client_sock, key):
         else:
             site_addr,site_port = (request_first_line.split(' ')[1]).split(':')
             print(site_addr,site_port)
-            
-            # would add the request info to the return here
-            # if it's valid
 
         
         #now encrypt message and send it back to the client server
@@ -197,7 +195,9 @@ def transmit_handshake_server(remote_server, client_sock, key):
         packet_header = struct.pack('!I',data_size)
 
         client_sock.sendall(packet_header + iv + ciphertext)
-        return (site_addr,site_port) #would also return addr and port here
+
+        #return valid address and port
+        return (site_addr,site_port)
 
 
     
@@ -208,8 +208,7 @@ def transmit_handshake_server(remote_server, client_sock, key):
 
 def ECC_Handshake(dest_sock,source_pub_key, is_client=True):
     try:
-      
-        #This ensures that both don't send their data
+        #This ensures that both client and server don't send their data
         # at the exact same time
         if is_client:
             dest_sock.sendall(source_pub_key)
@@ -236,25 +235,22 @@ def ECC_Handshake(dest_sock,source_pub_key, is_client=True):
 
 def start_remote_proxy(passKey="testPass", remote_host_broadcast_addr='127.0.0.1',enc_mode="PBKD"):
 
-    #TODO: figure out if this needs to be modified at all
     #generate a salted key from our password
     shared_salt = b'\x12\x34\x56\x78\x90\xab\xcd\xef\x11\x22\x33\x44\x55\x66\x77\x88'
     key = PBKDF2(passKey,shared_salt,dkLen=32,count=1000000)
 
-    #TODO: Check here what enc mode the user picked and decide if we use ECC or PBKD
-
+    #establish our server socket
     remote_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     remote_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     remote_server.bind((remote_host_broadcast_addr,9999)) #on the remote server this is set to 0.0.0.0:9999
     remote_server.listen(5)
-    print("listening on remote server")
+    print("listening on server")
 
     while True:
         client_sock, addr = remote_server.accept()
 
         if enc_mode == "ECC":
-            #generate our new for the server
-            # then send the public to the client and read the clients public
+
             server_key = ECC.generate(curve='p256')
             server_pub_key_bytes = server_key.public_key().export_key(format='DER')
 
@@ -312,6 +308,9 @@ def start_client_proxy(passKey="testPass",local_host_addr='127.0.0.1:8888',remot
         try:
             remote_connection.connect((remote_host_connection,9999))
 
+            #start timer
+            start_time = time.perf_counter()
+
             if enc_mode == "ECC":
                 client_key = ECC.generate(curve='p256')
                 client_pub_key_bytes = client_key.public_key().export_key(format='DER')
@@ -324,18 +323,20 @@ def start_client_proxy(passKey="testPass",local_host_addr='127.0.0.1:8888',remot
             
                 key = key_agreement(static_priv=client_key, static_pub=server_ECC,kdf=lambda x: SHA256.new(x).digest())
 
-
-
             if transmit_handshake_client(client_sock, remote_connection, key):
-        
-        
+                
+                #get the duration of our handshake and print it in milliseconds
+                end_time = time.perf_counter()
+                duration = (end_time - start_time) * 1000
+                print(f"Handshake completed in {duration:.2f} ms")
+
                 t1 = threading.Thread(target=forward_traffic, args=(client_sock,remote_connection,"enc",key))
                 t2 = threading.Thread(target=forward_traffic, args=(remote_connection,client_sock,"dec",key))
 
                 t1.start()
                 t2.start()
             else:
-                print("Handshake failed, closing connection")
+                #print("Handshake failed, closing connection")
                 client_sock.close()
                 remote_connection.close()
         except Exception as e:
@@ -351,14 +352,14 @@ def process_com_args():
                     start_client_proxy(enc_mode="ECC")
 
                 elif sys.argv[3] == "remote":
-                     start_client_proxy(enc_mode="ECC",remote_host_broadcast_addr = "0.0.0.0")
+                     start_client_proxy(enc_mode="ECC",remote_host_connection=sys.argv[4])
 
             elif sys.argv[2] == "PBKD":
                 if sys.argv[3] == "local":
                     start_client_proxy(enc_mode="PBKD",passKey = sys.argv[4])
 
                 elif sys.argv[3] == "remote":
-                     start_client_proxy(enc_mode="PBDK",passKey = sys.argv[4],remote_host_broadcast_addr = "0.0.0.0")
+                     start_client_proxy(enc_mode="PBDK",passKey = sys.argv[5],remote_host_connection=sys.argv[4])
         
         elif sys.argv[1] == "server":
             if sys.argv[2] == "ECC":

@@ -79,7 +79,7 @@ remote
 - If PBDK is used for handshake_mode then a password string is required for generating a key used to encrypt/decrypt traffic.
      
 > [!WARNING] 
-> If no password is provided, the default password of "testPass" will be > used, which is obviously not secure
+> If no password is provided, the default password of "testPass" will be used, which is obviously not secure
 
 ## Testing
 These are the 2 best methods I've found for testing roxy
