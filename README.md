@@ -2,6 +2,9 @@
 Simple tunneling proxy for encrypting and obfuscating network traffic
 through a private server
 
+> [!CAUTION] 
+> HTTPS Only: Since roxy uses HTTP CONNECT requests for tunneling only https:// URLs will work
+
 ## Dependencies
 - python
 - pycryptodome
@@ -119,6 +122,3 @@ python roxy.py server ECC local
 ```
 
 4) Now visit a website and observe the address of the website being printed in the second terminal
-
-> [!NOTE] 
-> The load times in firefox with the proxy tend to be quite slow
